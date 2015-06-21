@@ -69,6 +69,7 @@ class Lzma(object):
         return "_preset%i.lzma" % self.preset
 
 
+
 class FileInfo(object):
     def __init__(self, files):
         self.files = files
@@ -160,37 +161,36 @@ class TableData(object):
         print(content)
 
 
-
 class Benchmark(object):
     def __init__(self, files, out_path, compressors):
         self.files = files
         self.out_path = out_path
         self.compressors = compressors
 
-    def compress_file(self, filepath, compressor):
+    def compress_file(self, file_path, compressor):
         out_filename = "%s%s" % (
-            os.path.split(filepath)[1],
+            os.path.split(file_path)[1],
             compressor.filename_suffix()
         )
 
         out_filepath = os.path.join(self.out_path, out_filename)
-        src_name = os.path.split(filepath)[1]
+        src_name = os.path.split(file_path)[1]
         sys.stdout.write("| %15s | %14s" % (
             src_name, compressor.get_info()
         ))
         sys.stdout.flush()
 
-        statinfo = os.stat(filepath)
+        statinfo = os.stat(file_path)
         uncompressed_size = statinfo.st_size
 
-        with open(filepath, "rb") as source_file:
+        with open(file_path, "rb") as source_file:
             with open(out_filepath, "wb") as out_file:
                 start_time = time.time()
                 out_file.write(
                     compressor.compress(source_file.read())
                 )
+                duration = time.time() - start_time
 
-        duration = time.time() - start_time
         statinfo = os.stat(out_filename)
         compressed_size = statinfo.st_size
         percent = (100.0 / uncompressed_size) * compressed_size
@@ -204,7 +204,6 @@ class Benchmark(object):
     def run(self):
         table_data = TableData()
 
-        print("\n\n**run compression:**\n")
         print("| filename | compressor | duration | out size | ratio | out filename |")
         print("| -------- | ---------- | -------- | -------- | ----- | ------------ |")
 
@@ -218,31 +217,80 @@ class Benchmark(object):
                     compressor=compressor,
                     compressed_size=compressed_size,
                     duration=duration,
-
                 )
 
         print("\n")
         return table_data
 
 
+def zlib_compress_and_exit(files):
+    compressors = [Zlib(level=9)]
+
+    b = Benchmark(files, "./", compressors)
+    b.run()
+
+    sys.exit(0)
+
+
+"""
+https://github.com/pypyjs/pypyjs.github.io/issues/4
+
+IMHO best compress ratio/durations are:
+
+pypy.vm.js 	zlib level=5 	0.40sec 	2.02MB 	15.93%
+pypy.vm.js 	bzip2 level=1 	1.54sec 	1.66MB 	13.09%
+pypy.vm.js 	lzma preset=3 	1.67sec 	1.42MB 	11.22%
+
+pypy.vm.js.mem 	zlib level=5 	0.32sec 	1.98MB 	29.98%
+pypy.vm.js.mem 	bzip2 level=1 	1.12sec 	1.94MB 	29.42%
+pypy.vm.js.mem 	lzma preset=3 	0.96sec 	1.47MB 	22.27%
+
+A few findings:
+
+    - LZMA is very good, but only on fast machines
+    - bzip2 makes no sence: slower than LZMA with less ratio
+    - from zlib is "deflate" faster then "gzip/zlib" mode
+
+Currently only zlib deflate seems to be a candidate.
+"""
 if __name__ == "__main__":
     test_files = (
         "pypyjs-release/lib/pypy.vm.js",
         "pypyjs-release/lib/pypy.vm.js.mem"
     )
-    FileInfo(test_files).print_table()
+    # zlib_compress_and_exit(test_files)
+
+    # print("\n**warmup run:**\n")
+    # Benchmark(test_files, "./",
+    #     compressors = [
+    #         Zlib(level=0),
+    #         # Bzip2(level=1),
+    #         # Lzma(preset=0)
+    #     ]
+    # ).run()
+    # print("="*79)
 
     compressors = []
 
+    # lowest levels/presets, just for internal tests:
     # compressors += [Zlib(level) for level in range(0,2)]
     # compressors += [Bzip2(level) for level in range(1,3)]
     # compressors += [Lzma(preset) for preset in range(0,1)]
 
+    # all levels/presets (takes some minutes):
+    # compressors += [Zlib(level) for level in range(0,10)]
+    # compressors += [Bzip2(level) for level in range(1,10)]
+    # compressors += [Lzma(preset) for preset in range(0,10)]
+
+    # all levels/presets (takes some minutes):
     compressors += [Zlib(level) for level in range(0,10)]
-    compressors += [Bzip2(level) for level in range(1,10)]
-    compressors += [Lzma(preset) for preset in range(0,10)]
+    # compressors += [Bzip2(level) for level in range(1,10)]
+    # compressors += [Lzma(preset) for preset in range(0,10)]
+
+    FileInfo(test_files).print_table()
 
     for test_file in test_files:
+        print("\n\n**run compression:**\n")
         b = Benchmark([test_file], "./", compressors)
         table_data = b.run()
 

@@ -12,6 +12,14 @@ function human_time(milliseconds) {
     return milliseconds + 'ms'
 }
 
+function head_stringify(data, count) {
+    var txt="";
+    for (var i=0; i<count; i++) {
+        txt += String.fromCharCode(data[i]);
+    }
+    return JSON.stringify(txt)+"...";
+}
+
 // https://github.com/henrya/js-jquery/tree/master/BinaryTransport
 function binarytransport() {
      /**

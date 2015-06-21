@@ -45,7 +45,9 @@ if (typeof __dirname === "undefined") {
 }
 if (__dirname.charAt(__dirname.length - 1) !== "/") {
   __dirname += "/";
-} 
+}
+__dirname = "./pypyjs-release/lib/"; // XXX: remove!
+debug("Set __dirname to:" + __dirname);
 
 
 // Ensure we have reference to a 'Promise' constructor.
@@ -226,15 +228,18 @@ function PyPyJS(opts) {
   // have to pay asmjs compilation overhead each time we create the VM.
 
   if (! PyPyJS._vmBuilderPromise) {
-    PyPyJS._vmBuilderPromise = this.fetch("pypy.vm.js").then((function(xhr) {
+    PyPyJS._vmBuilderPromise = this.fetch_deflate("pypy.vm.js_level9.deflate").then((function(source) {
       // Parse the compiled code, hopefully asynchronously.
       // Unfortunately our use of Function constructor here doesn't
       // play very well with nodejs, where things like 'module' and
       // 'require' are not in the global scope.  We have to pass them
       // in explicitly as arguments.
+
+        console.log("create funcBody...");
+
       var funcBody = [
         // This is the compiled code for the VM.
-        xhr.responseText,
+        source,
         '\n',
         // Ensure that some functions are available on the Module,
         // for linking with jitted code.
@@ -249,6 +254,7 @@ function PyPyJS(opts) {
         "dependenciesFulfilled=function() { inDependenciesFulfilled(FS); };",
         "if(!memoryInitializer||(!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_WORKER))dependenciesFulfilled();",
       ].join("");
+      debug("funcBody:" + head_stringify(funcBody, count=40));
       return FunctionPromise("Module", "inDependenciesFulfilled", "require",
                              "module", "__filename", "__dirname", funcBody)
     }).bind(this));
@@ -383,7 +389,60 @@ function PyPyJS(opts) {
     }).bind(this))
     .then(resolve, reject);
   }).bind(this));
+};
 
+
+PyPyJS.prototype.fetch_deflate = function fetch_deflate(relpath, responseType) {
+    return new Promise((function(resolve, reject) {
+        console.log("fetch_deflate 1:" + relpath);
+
+        // XXX:
+//        var rootURL = this.rootURL || PyPyJS.rootURL;
+//        var url = rootURL + relpath;
+        var url = relpath;
+
+          // https://github.com/henrya/js-jquery/tree/master/BinaryTransport
+          // stored in "js/utils.js"
+          binarytransport();
+
+        var start_time = new Date();
+        $.ajax({
+            url: url,
+            type: "GET",
+            dataType: "binary",
+            responseType: "arraybuffer",
+            processData: false,
+            success: function(result) {
+                var duration = new Date() - start_time;
+                debug("\nRequest done in "+human_time(duration)+" - result type: " + Object.prototype.toString.call(result));
+
+                debug("convert to Uint8Array");
+                var start_time = new Date();
+                var uint8 = new Uint8Array(result);
+                var duration = new Date() - start_time;
+                debug("done in "+human_time(duration)+" - uint8 length: " + uint8.length + " Bytes");
+
+                debug("decompress...");
+                var start_time = new Date();
+                // from /js/zlib/inflare.min.js - https://github.com/imaya/zlib.js/
+                var inflate = new Zlib.Inflate(uint8); // compressed = Array.<number> or Uint8Array
+                var decompressed_uint8 = inflate.decompress();
+                var duration = new Date() - start_time;
+                debug("done in "+human_time(duration)+" to: "+decompressed_uint8.length+" Bytes.");
+                debug("First decompressed output:");
+
+                debug(head_stringify(decompressed_uint8, count=40));
+
+                debug("Create string...");
+                var start_time = new Date();
+                var source=decompressed_uint8.join('');
+                var duration = new Date() - start_time;
+                debug("Create string...done in "+human_time(duration));
+
+                return resolve(source);
+            }
+        });
+    }).bind(this));
 };
 
 

@@ -33,7 +33,7 @@ $(document).ready(function() {
     // stored in "js/utils.js"
     binarytransport()
 
-    function get_deflate_file(url) {
+    function get_deflate_file(url, as_string) {
         print("request file '"+url+"'");
         $.ajax({
             url: url,
@@ -52,23 +52,42 @@ $(document).ready(function() {
                 print("decompress...");
                 start_time = new Date();
                 var inflate = new Zlib.Inflate(uint8); // compressed = Array.<number> or Uint8Array
-                var decompressed = inflate.decompress();
+                var decompressed_uint8 = inflate.decompress();
                 var duration = new Date() - start_time;
-                print("done in "+human_time(duration)+" to: "+decompressed.length+" Bytes.");
+                print("done in "+human_time(duration)+" to: "+decompressed_uint8.length+" Bytes.");
                 print("First decompressed output:");
 
                 var myString="";
                 for (var i=0; i<80; i++) {
-                    myString += String.fromCharCode(decompressed[i])
+                    myString += String.fromCharCode(decompressed_uint8[i])
                 }
                 print(JSON.stringify(myString)+"...");
+
+                if (as_string) {
+                    print("Create string...");
+                    start_time = new Date();
+
+                    var source=""
+                    for (var i=0; i<decompressed_uint8.length; i++) {
+                        source += String.fromCharCode(decompressed_uint8[i])
+                    }
+
+                    var duration = new Date() - start_time;
+                    print("done in "+human_time(duration)+" to: "+source.length+" Bytes.");
+                    print("First string part:");
+                    var myString="";
+                    for (var i=0; i<80; i++) {
+                        myString += source[i]
+                    }
+                    print(JSON.stringify(myString)+"...");
+                }
             }
         });
     }
 
     $("#go").on( "click", function() {
-        get_deflate_file("pypy.vm.js_level9.deflate");
-        get_deflate_file("pypy.vm.js.mem_level9.deflate");
+        get_deflate_file("pypy.vm.js_level9.deflate", as_string=true);
+        get_deflate_file("pypy.vm.js.mem_level9.deflate", as_string=false);
     });
 
     print("Please click on 'Load' !");
