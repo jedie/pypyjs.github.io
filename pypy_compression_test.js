@@ -227,16 +227,38 @@ function PyPyJS(opts) {
   // We do this once and cache the result for re-use, so that we don't
   // have to pay asmjs compilation overhead each time we create the VM.
 
+  /*
+  add pypy.vm.js.mem, after pypyjs.zip loaded
+  see also:
+  https://kripken.github.io/emscripten-site/docs/tools_reference/emcc.html?highlight=memoryinitializerrequest
+  */
+  this.faked_memoryInitializerRequest = new Object();
+
   if (! PyPyJS._vmBuilderPromise) {
-    PyPyJS._vmBuilderPromise = this.fetch_deflate("pypy.vm.js_level9.deflate").then((function(source) {
+    PyPyJS._vmBuilderPromise = this.fetch_compressed(url="./download/pypyjs.zip").then((function(zip_files) {
+      /*
+      API: http://stuk.github.io/jszip/documentation/api_zipobject.html
+
+      asText() 	    string 	the content as an unicode string.
+      asBinary() 	    string 	the content as binary string.
+      asArrayBuffer()	ArrayBuffer 	need a compatible browser.
+      asUint8Array() 	Uint8Array 	    need a compatible browser.
+      asNodeBuffer() 	nodejs Buffer 	need nodejs.
+      */
+      debug("pypyjs.zip loaded. Existing files:" + Object.keys(zip_files));
+
+      // Add memory content, so that no additional request would be made:
+      this.faked_memoryInitializerRequest.response = zip_files["pypy.vm.js.mem"].asUint8Array();
+
       // Parse the compiled code, hopefully asynchronously.
       // Unfortunately our use of Function constructor here doesn't
       // play very well with nodejs, where things like 'module' and
       // 'require' are not in the global scope.  We have to pass them
       // in explicitly as arguments.
 
-        console.log("create funcBody...");
+      var source = zip_files["pypy.vm.js"].asText();
 
+      console.log("create funcBody...");
       var funcBody = [
         // This is the compiled code for the VM.
         source,
@@ -254,11 +276,11 @@ function PyPyJS(opts) {
         "dependenciesFulfilled=function() { inDependenciesFulfilled(FS); };",
         "if(!memoryInitializer||(!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_WORKER))dependenciesFulfilled();",
       ].join("");
-      debug("funcBody:" + head_stringify(funcBody, count=40));
+      debug("funcBody created:" + head_stringify(funcBody, count=40));
       return FunctionPromise("Module", "inDependenciesFulfilled", "require",
                              "module", "__filename", "__dirname", funcBody)
     }).bind(this));
-  }
+  };
 
   // Create a new instance of the compiled VM, bound to local state
   // and a local Module object.
@@ -276,7 +298,8 @@ function PyPyJS(opts) {
     Module.noFSInit = true;
     Module.thisProgram = "/lib/pypyjs/pypy.js";
     Module.filePackagePrefixURL = this.rootURL || PyPyJS.rootURL;
-    Module.memoryInitializerPrefixURL = this.rootURL || PyPyJS.rootURL;
+    // Module.memoryInitializerPrefixURL = this.rootURL || PyPyJS.rootURL;
+    Module.memoryInitializerRequest = this.faked_memoryInitializerRequest || PyPyJS.faked_memoryInitializerRequest;
     Module.locateFile = function(name) {
       return (this.rootURL || PyPyJS.rootURL) + name;
     }
@@ -392,58 +415,53 @@ function PyPyJS(opts) {
 };
 
 
-PyPyJS.prototype.fetch_deflate = function fetch_deflate(relpath, responseType) {
+PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
+    /*
+    Request a .zip archive and return the uncompressed files via:
+    https://github.com/Stuk/jszip and https://github.com/Stuk/jszip-utils
+
+    API: http://stuk.github.io/jszip/documentation/api_zipobject.html
+    */
     return new Promise((function(resolve, reject) {
-        console.log("fetch_deflate 1:" + relpath);
+        debug("Request url: '" + url + "'");
 
-        // XXX:
-//        var rootURL = this.rootURL || PyPyJS.rootURL;
-//        var url = rootURL + relpath;
-        var url = relpath;
+        JSZipUtils.getBinaryContent(url, function(err, data) {
+          if(err) {
+              debug(" Error:"+err);
+              reject(err);
+          } else {
+              // FIXME: is there a easier way to make a 'shallow copy' ?
+              var zip = new JSZip(data)
 
-          // https://github.com/henrya/js-jquery/tree/master/BinaryTransport
-          // stored in "js/utils.js"
-          binarytransport();
+              var zip_files = {};
+              var files = zip.filter(function(){return true;});
 
-        var start_time = new Date();
-        $.ajax({
-            url: url,
-            type: "GET",
-            dataType: "binary",
-            responseType: "arraybuffer",
-            processData: false,
-            success: function(result) {
-                var duration = new Date() - start_time;
-                debug("\nRequest done in "+human_time(duration)+" - result type: " + Object.prototype.toString.call(result));
-
-                debug("convert to Uint8Array");
-                var start_time = new Date();
-                var uint8 = new Uint8Array(result);
-                var duration = new Date() - start_time;
-                debug("done in "+human_time(duration)+" - uint8 length: " + uint8.length + " Bytes");
-
-                debug("decompress...");
-                var start_time = new Date();
-                // from /js/zlib/inflare.min.js - https://github.com/imaya/zlib.js/
-                var inflate = new Zlib.Inflate(uint8); // compressed = Array.<number> or Uint8Array
-                var decompressed_uint8 = inflate.decompress();
-                var duration = new Date() - start_time;
-                debug("done in "+human_time(duration)+" to: "+decompressed_uint8.length+" Bytes.");
-                debug("First decompressed output:");
-
-                debug(head_stringify(decompressed_uint8, count=40));
-
-                debug("Create string...");
-                var start_time = new Date();
-                var source=decompressed_uint8.join('');
-                var duration = new Date() - start_time;
-                debug("Create string...done in "+human_time(duration));
-
-                return resolve(source);
-            }
+              for (f of files) {
+                  zip_files[f.name] = f
+              }
+              return resolve(zip_files);
+          }
         });
     }).bind(this));
-};
+}
+
+PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(module_name) {
+      debug("get_module("+module_name+")");
+      var url="./download/"+module_name+".zip";
+      return get_archive(url);
+}
+
+
+
+//    get_module(module_name = "HTMLParser").then(function(files) {
+//        debug("*** Module 'HTMLParser' loaded, contains the files:");
+//        names = "";
+//        for (f of files) {
+//            names += " "+f.name
+//        }
+//        debug(names);
+//    });
+
 
 
 // A simple file-fetching wrapper around XMLHttpRequest,
