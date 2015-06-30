@@ -246,7 +246,8 @@ class ModuleCompressor(object):
 
         if "dir" in data:
             dir = data["dir"]
-            import_name = "%s.%s" % (data["dir"], "__init__")
+            dir = dir.replace("/", ".")
+            import_name = "%s.%s" % (dir, "__init__")
             self.get_module(import_name, files, seen)
             # print("\t* append dir:", import_name)
             # Include the parent package
