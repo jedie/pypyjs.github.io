@@ -273,7 +273,7 @@ function PyPyJS(opts) {
         "dependenciesFulfilled=function() { inDependenciesFulfilled(FS); };",
         "if(!memoryInitializer||(!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_WORKER))dependenciesFulfilled();",
       ].join("");
-      debug("funcBody created:" + head_stringify(funcBody, count=40));
+//      debug("funcBody created:" + head_stringify(funcBody, count=40));
       return FunctionPromise("Module", "inDependenciesFulfilled", "require",
                              "module", "__filename", "__dirname", funcBody)
     }).bind(this));
@@ -460,14 +460,7 @@ PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(modu
 
 
 
-//    get_module(module_name = "HTMLParser").then(function(files) {
-//        debug("*** Module 'HTMLParser' loaded, contains the files:");
-//        names = "";
-//        for (f of files) {
-//            names += " "+f.name
-//        }
-//        debug(names);
-//    });
+
 
 
 
@@ -914,6 +907,16 @@ PyPyJS.prototype._findModuleDeps = function _findModuleDeps(name, seen) {
 }
 
 
+
+
+PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(module_name) {
+      debug("get_module("+module_name+")");
+      var url="./download/"+module_name+".zip";
+      debug("module url:" + url);
+      return this.fetch_compressed(url);
+}
+
+
 PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
   return (function() {
     // If we've already loaded this module, we're done.
@@ -930,12 +933,42 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
     }
     // We need to fetch the module file and write it out.
     var modfile = this._allModules[name].file;
-    var p = this.fetch("modules/" + modfile)
-    .then((function(xhr) {
-      var contents = xhr.responseText;
-      this._writeModuleFile(name, contents)
-      delete this._pendingModules[name];
-    }).bind(this))
+
+    // remove file extension:
+    var module_name = modfile.substr(0, modfile.lastIndexOf("."));
+
+//    console.log("module_name:" + module_name);
+
+    var p = this.fetch_compressed_module(module_name=module_name).then((function(zip_files) {
+        debug("module loaded. Existing files:" + Object.keys(zip_files));
+        for (filename of Object.keys(zip_files)) {
+//          debug("from zip archive: " + filename);
+          var data = zip_files[filename].asText(); // what's about binary files?!?
+          //debug("data type:" + JSON.stringify(data));
+//          debug("data type:" + data.toSource());
+//          debug("content:"+head_stringify(data, count=40));
+
+          var name=filename.substr(0, filename.lastIndexOf(".")); // remove file extension
+          var name=name.replace(new RegExp("/", 'g'), "."); // to package name
+//          debug("package name:" + name)
+
+          this._writeModuleFile(name, content);
+          delete this._pendingModules[name];
+//          debug("file '"+name+"' removed from pending.")
+        }
+    }).bind(this)).catch(function(err) {
+        // TODO: try normal fetch. How?!?
+        debug(" *** load module error: " + err.toSource());
+
+//        var p = this.fetch("modules/" + modfile).then((function(xhr) {
+//          var contents = xhr.responseText;
+//          this._writeModuleFile(name, contents)
+//          delete this._pendingModules[name];
+//        }).bind(this))
+//        this._pendingModules[name] = p;
+//        return p;
+
+    });
     this._pendingModules[name] = p;
     return p;
   }).bind(this);
@@ -943,8 +976,13 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
 
 
 PyPyJS.prototype._writeModuleFile = function _writeModuleFile(name, data) {
+
+//  debug("write module file '"+name+"' data:"+head_stringify(content, count=40));
+
   var Module = this._module;
   var file = this._allModules[name].file;
+//  debug("writeModuleFile: '"+name+"' as file '"+file+"'");
+
   // Create the containing directory first.
   var dir = file.split("/").slice(0, -1).join("/")
   try {
