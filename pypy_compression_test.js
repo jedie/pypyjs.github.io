@@ -116,6 +116,9 @@ var devNull = {
   stderr: function() { },
 }
 
+// FIXME: Is this the right place for this cache?!?
+var __mem_cache // uncompressed content of 'pypy.vm.js.mem'
+
 
 // Main class representing the PyPy VM.
 // This is our primary export and return value.
@@ -227,13 +230,6 @@ function PyPyJS(opts) {
   // We do this once and cache the result for re-use, so that we don't
   // have to pay asmjs compilation overhead each time we create the VM.
 
-  /*
-  add pypy.vm.js.mem, after pypyjs.zip loaded
-  see also:
-  https://kripken.github.io/emscripten-site/docs/tools_reference/emcc.html?highlight=memoryinitializerrequest
-  */
-  this.faked_memoryInitializerRequest = new Object();
-
   if (! PyPyJS._vmBuilderPromise) {
     PyPyJS._vmBuilderPromise = this.fetch_compressed(url="./download/pypyjs.zip").then((function(zip_files) {
       /*
@@ -248,7 +244,7 @@ function PyPyJS(opts) {
       debug("pypyjs.zip loaded. Existing files:" + Object.keys(zip_files));
 
       // Add memory content, so that no additional request would be made:
-      this.faked_memoryInitializerRequest.response = zip_files["pypy.vm.js.mem"].asUint8Array();
+      __mem_cache = zip_files["pypy.vm.js.mem"].asUint8Array();
 
       // Parse the compiled code, hopefully asynchronously.
       // Unfortunately our use of Function constructor here doesn't
@@ -299,7 +295,6 @@ function PyPyJS(opts) {
     Module.thisProgram = "/lib/pypyjs/pypy.js";
     Module.filePackagePrefixURL = this.rootURL || PyPyJS.rootURL;
     // Module.memoryInitializerPrefixURL = this.rootURL || PyPyJS.rootURL;
-    Module.memoryInitializerRequest = this.faked_memoryInitializerRequest || PyPyJS.faked_memoryInitializerRequest;
     Module.locateFile = function(name) {
       return (this.rootURL || PyPyJS.rootURL) + name;
     }
@@ -361,6 +356,12 @@ function PyPyJS(opts) {
     var moduleDataP = this.fetch("modules/index.json");
 
     PyPyJS._vmBuilderPromise.then((function(vmBuilder) {
+
+      // add the cached uncompressed content of 'pypy.vm.js.mem'
+      // so that emscripten doesn't made a additional request
+      Module.memoryInitializerRequest = new Object();
+      Module.memoryInitializerRequest.response = __mem_cache; // Uint8Array
+
       var args = [
         Module,
         dependenciesFulfilled,
