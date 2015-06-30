@@ -118,6 +118,7 @@ var devNull = {
 
 // FIXME: Is this the right place for this cache?!?
 var __mem_cache // uncompressed content of 'pypy.vm.js.mem'
+var __index_json_cache // cache for 'index.json' file content
 
 
 // Main class representing the PyPy VM.
@@ -352,8 +353,13 @@ function PyPyJS(opts) {
     // Begin fetching the metadata for available python modules.
     // With luck these can download while we jank around compiling
     // all of that javascript.
-    // XXX TODO: also load memory initializer this way.
-    var moduleDataP = this.fetch("modules/index.json");
+    if (!__index_json_cache) {
+      debug("index.json not cached");
+      __index_json_cache = this.fetch("modules/index.json");
+    } else {
+      debug("use index.json cache");
+    }
+    var moduleDataP = __index_json_cache;
 
     PyPyJS._vmBuilderPromise.then((function(vmBuilder) {
 
