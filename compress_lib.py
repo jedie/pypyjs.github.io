@@ -83,9 +83,9 @@ class ZipCompressor(object):
     def get_info(self):
         return "%s with level=%i" % (self.SUFFIX, self.level)
 
-    def compress(self, out_dir, tar_name, files_dir, files, verbose=False):
-        tar_name = tar_name + self.SUFFIX
-        out_filename = os.path.join(out_dir, tar_name)
+    def compress(self, out_dir, archive_name, files_dir, files, verbose=False):
+        archive_name = archive_name + self.SUFFIX
+        out_filename = os.path.join(out_dir, archive_name)
 
         total_uncompressed_size = 0
         with zipfile.ZipFile(out_filename, mode="w", compression=self.COMPRESSION) as zip:
@@ -108,7 +108,7 @@ class ZipCompressor(object):
                     print("compressed in %.2fsec." % duration)
 
         compressed_size = os.stat(out_filename).st_size
-        return tar_name, total_uncompressed_size, compressed_size
+        return archive_name, total_uncompressed_size, compressed_size
 
 
 class LzmaZipCompressor(ZipCompressor):
@@ -131,12 +131,19 @@ class ModuleCompressor(object):
         self.meta_file = os.path.join(self.modules_dir, "meta.json")
         self.load_index()
 
-    def compress(self, max_packages=None):
+    def compress(self, max_packages=None, modules=None):
+        print()
+
         # files, seen = self.get_module("UserDict")
         # print(files, seen)
         # return
+        if modules is None:
+            # all modules
+            modules = sorted(self.modules.keys())
+        else:
+            print("Compress only modules.....:", modules)
 
-        print("\ncreated archive files in..:", self.download_dir)
+        print("created archive files in..:", self.download_dir)
         print("Used compression..........: %s" % self.compressor.get_info())
         print("\n")
 
@@ -145,7 +152,7 @@ class ModuleCompressor(object):
         total_uncompressed_size = 0
         total_compressed_size = 0
         start_time = time.time()
-        for module_name in sorted(self.modules.keys()):
+        for module_name in modules:
             files, seen = self.get_module(module_name)
             if not files:
                 print("Skip:", module_name)
@@ -193,7 +200,7 @@ class ModuleCompressor(object):
         """
         tar_name, uncompressed_size, compressed_size = self.compressor.compress(
             out_dir=self.download_dir,
-            tar_name=module_name,
+            archive_name=module_name,
             files_dir=self.modules_dir,
             files=files
         )
@@ -239,18 +246,16 @@ class ModuleCompressor(object):
         try:
             data = self.modules[module_name]
         except KeyError:
-            # print("\tSkip:", module_name)
+            print("\tSkip:", module_name)
             return files, seen
 
         # print("\nmodule name:", module_name)
 
         if "dir" in data:
             dir = data["dir"]
-            dir = dir.replace("/", ".")
-            import_name = "%s.%s" % (dir, "__init__")
+            import_name = "%s.%s" % (dir.replace("/", "."), "__init__")
             self.get_module(import_name, files, seen)
-            # print("\t* append dir:", import_name)
-            # Include the parent package
+            print("\t* Include the parent package:", dir, "-", import_name)
             self._add_parent(dir, files, seen)
 
         try:
@@ -259,12 +264,12 @@ class ModuleCompressor(object):
             # print("No file:", data)
             return files, seen
 
-        # print("filename:", filename)
+        print("filename:", filename)
         if filename and not self._skip_module(module_name): # in exclude/preload:
             # print("\t * append", filename)
             files.append(filename)
             if os.sep in filename:
-                # Include the parent package
+                print("Include the parent package:", filename)
                 self._add_parent(filename, files, seen)
 
         imports = data["imports"]
@@ -306,7 +311,7 @@ class VMCompressor(object):
 
         tar_name, uncompressed_size, compressed_size = self.compressor.compress(
             out_dir=self.out_dir,
-            tar_name="pypyjs",
+            archive_name="pypyjs",
             files_dir=self.files_dir,
             files=self.files,
             verbose=True,
@@ -355,5 +360,6 @@ if __name__ == "__main__":
             out_dir="download",
             compressor=compressor
         ).compress(
-            max_packages=20 # XXX: only for developing!
+            # max_packages=60 # XXX: only for developing!
+            modules=["platform"]  # XXX: only for developing!
         )
