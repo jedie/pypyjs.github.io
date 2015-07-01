@@ -355,7 +355,8 @@ function PyPyJS(opts) {
     // all of that javascript.
     if (!__index_json_cache) {
       debug("index.json not cached");
-      __index_json_cache = this.fetch("modules/index.json");
+      var rootURL = this.rootURL || PyPyJS.rootURL // FIXME
+      __index_json_cache = this.fetch(rootURL + "modules/index.json");
     } else {
       debug("use index.json cache");
     }
@@ -430,7 +431,7 @@ PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
     API: http://stuk.github.io/jszip/documentation/api_zipobject.html
     */
     return new Promise((function(resolve, reject) {
-        debug("Request url: '" + url + "'");
+        debug("fetch_compressed url: '" + url + "'");
 
         JSZipUtils.getBinaryContent(url, function(err, data) {
           if(err) {
@@ -453,43 +454,39 @@ PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
 }
 
 PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(module_name) {
-      debug("get_module("+module_name+")");
+      debug("fetch_compressed_module("+module_name+")");
       var url="./download/"+module_name+".zip";
       return get_archive(url);
 }
 
-
-
-
-
-
-
 // A simple file-fetching wrapper around XMLHttpRequest,
 // that treats paths as relative to the pypy.js root url.
 //
-PyPyJS.prototype.fetch = function fetch(relpath, responseType) {
+PyPyJS.prototype.fetch = function fetch(url, responseType) {
   // For the web, use XMLHttpRequest.
   if (typeof XMLHttpRequest !== "undefined") {
     return new Promise((function(resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.onload = function() {
         if (xhr.status >= 400) {
+          debug("fetch '"+url+"' ERROR");
           reject(xhr)
         } else {
+          debug("fetch '"+url+"' done.");
+//          debug("responseText:" + responseText)
           resolve(xhr);
         }
       };
-      var rootURL = this.rootURL || PyPyJS.rootURL;
-      xhr.open('GET', rootURL + relpath, true);
-      xhr.responseType = responseType || "string";
+      debug("fetch('"+url+"')")
+      xhr.open('GET', url, true);
+      xhr.responseType = responseType || "text";
       xhr.send(null);
     }).bind(this));
   }
   // For nodejs, use fs.readFile.
   if (typeof fs !== "undefined" && typeof fs.readFile !== "undefined") {
     return new Promise((function(resolve, reject) {
-      var rootURL = this.rootURL || PyPyJS.rootURL;
-      fs.readFile(path.join(rootURL, relpath), function(err, data) {
+      fs.readFile(url, function(err, data) {
         if (err) return reject(err);
         resolve({ responseText: data.toString() });
       });
@@ -498,16 +495,14 @@ PyPyJS.prototype.fetch = function fetch(relpath, responseType) {
   // For spidermonkey, use snarf (which has a binary read mode).
   if (typeof snarf !== "undefined") {
     return new Promise((function(resolve, reject) {
-      var rootURL = this.rootURL || PyPyJS.rootURL;
-      var data = snarf(rootURL + relpath);
+      var data = snarf(url);
       resolve({ responseText: data });
     }).bind(this));
   }
   // For d8, use read() and readbuffer().
   if (typeof read !== "undefined" && typeof readbuffer !== "undefined") {
     return new Promise((function(resolve, reject) {
-      var rootURL = this.rootURL || PyPyJS.rootURL;
-      var data = read(rootURL + relpath);
+      var data = read(url);
       resolve({ responseText: data });
     }).bind(this));
   }
@@ -916,6 +911,20 @@ PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(modu
       return this.fetch_compressed(url);
 }
 
+PyPyJS.prototype.fetch_json_module = function fetch_json_module(module_name) {
+    var url="./download/"+module_name+".json";
+//    var responseType="json";
+    var responseType="text";
+    debug("fetch module as '"+responseType+"': " + url);
+    return this.fetch(url, responseType).then((function(xhr) {
+        var code = xhr.responseText;
+        debug("fetch "+url+" done "+code.length+"Bytes content: "+head_stringify(code, 50));
+        code = JSON.parse(code);
+//        debug("parse:" + JSON.stringify(code));
+//        debug("parsed json: "+head_stringify(code, 50));
+        return code
+    }).bind(this));
+}
 
 PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
   return (function() {
@@ -939,16 +948,14 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
 
 //    console.log("module_name:" + module_name);
 
-    var p = this.fetch_compressed_module(module_name=module_name).then((function(zip_files) {
-        debug("module loaded. Existing files:" + Object.keys(zip_files));
-        for (filename of Object.keys(zip_files)) {
-//          debug("from zip archive: " + filename);
-          var data = zip_files[filename].asText(); // what's about binary files?!?
-          //debug("data type:" + JSON.stringify(data));
-//          debug("data type:" + data.toSource());
-//          debug("content:"+head_stringify(data, count=40));
+    var p = this.fetch_json_module(module_name=module_name).then((function(code) {
+        debug("module loaded. length:" + code.length);
+        for (file_data of code) {
+          file_name = file_data["file_name"]
+          content = file_data["content"]
+//          debug("file '"+file_name+"' content:"+head_stringify(content, count=40));
 
-          var name=filename.substr(0, filename.lastIndexOf(".")); // remove file extension
+          var name=file_name.substr(0, file_name.lastIndexOf(".")); // remove file extension
           var name=name.replace(new RegExp("/", 'g'), "."); // to package name
 //          debug("package name:" + name)
 

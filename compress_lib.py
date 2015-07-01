@@ -120,16 +120,138 @@ class LzmaZipCompressor(ZipCompressor):
         lzma.PRESET_DEFAULT = 9 # FIXME: http://bugs.python.org/issue21417
 
 
-
-class ModuleCompressor(object):
-    def __init__(self, modules_dir, out_dir, compressor):
+class ModuleInfo(object):
+    def __init__(self, modules_dir):
         self.modules_dir = modules_dir
-        self.download_dir = out_dir
-        self.compressor = compressor
-
         self.index_file = os.path.join(self.modules_dir, "index.json")
         self.meta_file = os.path.join(self.modules_dir, "meta.json")
         self.load_index()
+
+    def _add_parent(self, module_name, files, seen):
+        # Include the parent package, if any.
+        parent = os.path.split(module_name)[0]
+        parent = parent.replace(os.sep, ".")
+        if parent:
+            if parent not in seen:
+                # print("\t add parent:", parent)
+                self.get_module(parent, files, seen)
+
+    def _skip_module(self, module_name):
+        return bool(
+            module_name in self.exclude or module_name in self.preload
+        )
+
+    def get_module(self, module_name, files=None, seen=None):
+        if files is None:
+            files = []
+
+        if seen is None:
+            seen = [module_name]
+        else:
+            if module_name in seen:
+                return files, seen
+            seen.append(module_name)
+
+        if self._skip_module(module_name): # in exclude/preload
+            return files, seen
+
+        try:
+            data = self.modules[module_name]
+        except KeyError:
+            # print("\tSkip:", module_name)
+            return files, seen
+
+        # print("\nmodule name:", module_name)
+
+        if "dir" in data:
+            dir = data["dir"]
+            import_name = "%s.%s" % (dir.replace("/", "."), "__init__")
+            self.get_module(import_name, files, seen)
+            # print("\t* Include the parent package:", dir, "-", import_name)
+            self._add_parent(dir, files, seen)
+
+        try:
+            filename = data["file"]
+        except KeyError:
+            # print("No file:", data)
+            return files, seen
+
+        # print("filename:", filename)
+        if filename and not self._skip_module(module_name): # in exclude/preload:
+            # print("\t * append", filename)
+            files.append(filename)
+            if os.sep in filename:
+                # print("Include the parent package:", filename)
+                self._add_parent(filename, files, seen)
+
+        imports = data["imports"]
+        # print("imports:", imports)
+        for import_name in imports:
+            # print("\t imports: %r" % import_name)
+            if import_name in seen or self._skip_module(module_name): # in exclude/preload:
+                continue
+
+            self.get_module(import_name, files, seen)
+        return files, seen
+
+    def load_index(self):
+        """Load in-memory state from the index file."""
+        print("\nread %s" % self.index_file)
+        with open(self.index_file) as f:
+            index = json.load(f)
+        self.modules = index["modules"]
+        self.preload = index["preload"]
+
+        print("read %s" % self.meta_file)
+        with open(self.meta_file) as f:
+            meta = json.load(f)
+        self.exclude = meta["exclude"]
+        self.missing = meta["missing"]
+
+
+class ModuleJsonPacker(ModuleInfo):
+    def __init__(self, modules_dir, out_dir):
+        self.out_dir = out_dir
+        super(ModuleJsonPacker, self).__init__(modules_dir)
+
+    def pack_module(self, module_name):
+        files, seen = self.get_module(module_name)
+        if not files:
+            print("Skip: %s because no files" % module_name)
+            return
+
+        archive_name = "%s.json" % module_name
+        out_filename = os.path.join(self.out_dir, archive_name)
+
+        with open(out_filename, "w") as out_file:
+            module_data = []
+            for file_name in files:
+                file_path = os.path.join(self.modules_dir, file_name)
+                with open(file_path, "r") as in_file: # XXX: encoding?!?
+                    module_content = in_file.read()
+
+                module_data.append({
+                    "file_name": file_name,
+                    "content": module_content,
+                })
+
+            json_dump = json.dumps(module_data, indent="\t")
+            # print(json_dump)
+            out_file.write(json_dump)
+
+        file_size = os.stat(out_filename).st_size
+        print("%s written, size: %i Bytes" % (out_filename, file_size))
+
+    def pack_modules(self, module_names):
+        for module_name in module_names:
+            self.pack_module(module_name)
+
+
+class ModuleCompressor(ModuleInfo):
+    def __init__(self, modules_dir, out_dir, compressor):
+        self.out_dir = out_dir
+        self.compressor = compressor
+        super(ModuleCompressor, self).__init__(modules_dir)
 
     def compress(self, max_packages=None, modules=None):
         print()
@@ -143,7 +265,7 @@ class ModuleCompressor(object):
         else:
             print("Compress only modules.....:", modules)
 
-        print("created archive files in..:", self.download_dir)
+        print("created archive files in..:", self.out_dir)
         print("Used compression..........: %s" % self.compressor.get_info())
         print("\n")
 
@@ -199,7 +321,7 @@ class ModuleCompressor(object):
         total compressed size....: 349.6 MB
         """
         tar_name, uncompressed_size, compressed_size = self.compressor.compress(
-            out_dir=self.download_dir,
+            out_dir=self.out_dir,
             archive_name=module_name,
             files_dir=self.modules_dir,
             files=files
@@ -215,86 +337,7 @@ class ModuleCompressor(object):
             ))
         return uncompressed_size, compressed_size
 
-    def _add_parent(self, module_name, files, seen):
-        # Include the parent package, if any.
-        parent = os.path.split(module_name)[0]
-        parent = parent.replace(os.sep, ".")
-        if parent:
-            if parent not in seen:
-                # print("\t add parent:", parent)
-                self.get_module(parent, files, seen)
 
-    def _skip_module(self, module_name):
-        return bool(
-            module_name in self.exclude or module_name in self.preload
-        )
-
-    def get_module(self, module_name, files=None, seen=None):
-        if files is None:
-            files = []
-
-        if seen is None:
-            seen = [module_name]
-        else:
-            if module_name in seen:
-                return files, seen
-            seen.append(module_name)
-
-        if self._skip_module(module_name): # in exclude/preload
-            return files, seen
-
-        try:
-            data = self.modules[module_name]
-        except KeyError:
-            print("\tSkip:", module_name)
-            return files, seen
-
-        # print("\nmodule name:", module_name)
-
-        if "dir" in data:
-            dir = data["dir"]
-            import_name = "%s.%s" % (dir.replace("/", "."), "__init__")
-            self.get_module(import_name, files, seen)
-            print("\t* Include the parent package:", dir, "-", import_name)
-            self._add_parent(dir, files, seen)
-
-        try:
-            filename = data["file"]
-        except KeyError:
-            # print("No file:", data)
-            return files, seen
-
-        print("filename:", filename)
-        if filename and not self._skip_module(module_name): # in exclude/preload:
-            # print("\t * append", filename)
-            files.append(filename)
-            if os.sep in filename:
-                print("Include the parent package:", filename)
-                self._add_parent(filename, files, seen)
-
-        imports = data["imports"]
-        # print("imports:", imports)
-        for import_name in imports:
-            # print("\t imports: %r" % import_name)
-            if import_name in seen or self._skip_module(module_name): # in exclude/preload:
-                continue
-
-            self.get_module(import_name, files, seen)
-        return files, seen
-
-    def load_index(self):
-        """Load in-memory state from the index file."""
-        print("\nread %s" % self.index_file)
-        with open(self.index_file) as f:
-            index = json.load(f)
-        self.modules = index["modules"]
-        self.preload = index["preload"]
-
-        print("read %s" % self.meta_file)
-        with open(self.meta_file) as f:
-            meta = json.load(f)
-        self.exclude = meta["exclude"]
-        self.missing = meta["missing"]
 
 
 class VMCompressor(object):
@@ -328,6 +371,9 @@ class VMCompressor(object):
         return uncompressed_size, compressed_size
 
 
+
+
+
 if __name__ == "__main__":
     out_dir="download"
 
@@ -338,28 +384,38 @@ if __name__ == "__main__":
     except FileExistsError:
         pass
 
-    compressors = [
-        # LzmaZipCompressor(level=9),
-        # TarGzCompressor(level=9),
-        ZipCompressor(level=9),
-    ]
 
-    for compressor in compressors:
-        print("="*79)
-        print("\n +++ Compress pypyjs vm init files: +++")
-        VMCompressor(
-            files_dir="pypyjs-release/lib",
-            files=["pypy.vm.js", "pypy.vm.js.mem"],
-            out_dir="download",
-            compressor=compressor
-        ).compress()
+    module_json_packer = ModuleJsonPacker(
+        modules_dir="pypyjs-release/lib/modules",
+        out_dir="download",
+    )
+    module_json_packer.pack_modules(
+        module_names=("time","platform")
+    )
 
-        print("\n +++ Compress modules: +++")
-        ModuleCompressor(
-            modules_dir="pypyjs-release/lib/modules",
-            out_dir="download",
-            compressor=compressor
-        ).compress(
-            # max_packages=60 # XXX: only for developing!
-            modules=["platform"]  # XXX: only for developing!
-        )
+
+    # compressors = [
+    #     # LzmaZipCompressor(level=9),
+    #     # TarGzCompressor(level=9),
+    #     ZipCompressor(level=9),
+    # ]
+    #
+    # for compressor in compressors:
+    #     print("="*79)
+    #     print("\n +++ Compress pypyjs vm init files: +++")
+    #     VMCompressor(
+    #         files_dir="pypyjs-release/lib",
+    #         files=["pypy.vm.js", "pypy.vm.js.mem"],
+    #         out_dir="download",
+    #         compressor=compressor
+    #     ).compress()
+    #
+    #     print("\n +++ Compress modules: +++")
+    #     ModuleCompressor(
+    #         modules_dir="pypyjs-release/lib/modules",
+    #         out_dir="download",
+    #         compressor=compressor
+    #     ).compress(
+    #         # max_packages=60 # XXX: only for developing!
+    #         modules=["platform"]  # XXX: only for developing!
+    #     )
