@@ -577,6 +577,7 @@ function _escape(value) {
 //
 PyPyJS.prototype.exec = function exec(code) {
   return this.ready.then((function() {
+    var start_time = new Date();
     var p = Promise.resolve();
     // Find any "import" statements in the code,
     // and ensure the modules are ready for loading.
@@ -591,6 +592,7 @@ PyPyJS.prototype.exec = function exec(code) {
     // Now we can execute the code in custom top-level scope.
     code = 'exec \'\'\'' + _escape(code) + '\'\'\' in top_level_scope';
     p = p.then((function() {
+      debug("Ready to execute in " + human_time(new Date() - start_time));
       return this._execute_source(code);
     }).bind(this));
     return p;
