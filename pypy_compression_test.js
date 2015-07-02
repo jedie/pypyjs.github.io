@@ -454,7 +454,7 @@ PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
                   zip_files[f.name] = f
               }
               var parse_duration = new Date() - parse_start_time;
-              debug(".zip parsed in " + human_time(request_duration));
+              debug(".zip parsed in " + human_time(parse_duration));
               return resolve(zip_files);
           }
         });
