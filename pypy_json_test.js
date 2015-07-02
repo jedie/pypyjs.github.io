@@ -464,6 +464,8 @@ PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(modu
 //
 PyPyJS.prototype.fetch = function fetch(url, responseType) {
   // For the web, use XMLHttpRequest.
+  debug("Request url: '" + url + "'");
+  var request_start_time = new Date;
   if (typeof XMLHttpRequest !== "undefined") {
     return new Promise((function(resolve, reject) {
       var xhr = new XMLHttpRequest();
@@ -472,12 +474,12 @@ PyPyJS.prototype.fetch = function fetch(url, responseType) {
           debug("fetch '"+url+"' ERROR");
           reject(xhr)
         } else {
-          debug("fetch '"+url+"' done.");
+          var request_duration = new Date() - request_start_time;
+          debug(url + " loaded in " + human_time(request_duration));
 //          debug("responseText:" + responseText)
           resolve(xhr);
         }
       };
-      debug("fetch('"+url+"')")
       xhr.open('GET', url, true);
       xhr.responseType = responseType || "text";
       xhr.send(null);
@@ -919,7 +921,12 @@ PyPyJS.prototype.fetch_json_module = function fetch_json_module(module_name) {
     return this.fetch(url, responseType).then((function(xhr) {
         var code = xhr.responseText;
         debug("fetch "+url+" done "+code.length+"Bytes content: "+head_stringify(code, 50));
+
+        var start = new Date();
         code = JSON.parse(code);
+        var duration = new Date() - start;
+        debug("JSON.parse() in " + human_time(duration));
+
 //        debug("parse:" + JSON.stringify(code));
 //        debug("parsed json: "+head_stringify(code, 50));
         return code
@@ -950,6 +957,9 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
 
     var p = this.fetch_json_module(module_name=module_name).then((function(code) {
         debug("module loaded. length:" + code.length);
+
+        var start = new Date();
+
         for (file_data of code) {
           file_name = file_data["file_name"]
           content = file_data["content"]
@@ -963,6 +973,10 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
           delete this._pendingModules[name];
 //          debug("file '"+name+"' removed from pending.")
         }
+
+        var duration = new Date() - start;
+        debug("created all files in " + human_time(duration));
+
     }).bind(this)).catch(function(err) {
         // TODO: try normal fetch. How?!?
         debug(" *** load module error: " + err.toSource());

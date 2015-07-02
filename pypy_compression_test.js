@@ -422,6 +422,9 @@ function PyPyJS(opts) {
 };
 
 
+
+
+
 PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
     /*
     Request a .zip archive and return the uncompressed files via:
@@ -431,12 +434,16 @@ PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
     */
     return new Promise((function(resolve, reject) {
         debug("Request url: '" + url + "'");
-
+        var request_start_time = new Date;
         JSZipUtils.getBinaryContent(url, function(err, data) {
           if(err) {
               debug(" Error:"+err);
               reject(err);
           } else {
+              var request_duration = new Date() - request_start_time;
+              debug(url + " loaded in " + human_time(request_duration));
+
+              var parse_start_time = new Date;
               // FIXME: is there a easier way to make a 'shallow copy' ?
               var zip = new JSZip(data)
 
@@ -446,19 +453,13 @@ PyPyJS.prototype.fetch_compressed = function fetch_compressed(url) {
               for (f of files) {
                   zip_files[f.name] = f
               }
+              var parse_duration = new Date() - parse_start_time;
+              debug(".zip parsed in " + human_time(request_duration));
               return resolve(zip_files);
           }
         });
     }).bind(this));
 }
-
-PyPyJS.prototype.fetch_compressed_module = function fetch_compressed_module(module_name) {
-      debug("get_module("+module_name+")");
-      var url="./download/"+module_name+".zip";
-      return get_archive(url);
-}
-
-
 
 
 
@@ -941,6 +942,9 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
 
     var p = this.fetch_compressed_module(module_name=module_name).then((function(zip_files) {
         debug("module loaded. Existing files:" + Object.keys(zip_files));
+
+        var start = new Date();
+
         for (filename of Object.keys(zip_files)) {
 //          debug("from zip archive: " + filename);
           var data = zip_files[filename].asText(); // what's about binary files?!?
@@ -956,6 +960,10 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
           delete this._pendingModules[name];
 //          debug("file '"+name+"' removed from pending.")
         }
+
+        var duration = new Date() - start;
+        debug("created all files in " + human_time(duration));
+
     }).bind(this)).catch(function(err) {
         // TODO: try normal fetch. How?!?
         msg = " *** load module error: ";
