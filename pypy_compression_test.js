@@ -481,7 +481,7 @@ PyPyJS.prototype.fetch = function fetch(relpath, responseType) {
       };
       var rootURL = this.rootURL || PyPyJS.rootURL;
       xhr.open('GET', rootURL + relpath, true);
-      xhr.responseType = responseType || "string";
+      xhr.responseType = responseType || "text";
       xhr.send(null);
     }).bind(this));
   }
@@ -952,13 +952,20 @@ PyPyJS.prototype._makeLoadModuleData = function _makeLoadModuleData(name) {
           var name=name.replace(new RegExp("/", 'g'), "."); // to package name
 //          debug("package name:" + name)
 
-          this._writeModuleFile(name, content);
+          this._writeModuleFile(name, data);
           delete this._pendingModules[name];
 //          debug("file '"+name+"' removed from pending.")
         }
     }).bind(this)).catch(function(err) {
         // TODO: try normal fetch. How?!?
-        debug(" *** load module error: " + err.toSource());
+        msg = " *** load module error: ";
+        if (err.toSource) {
+          msg += err.toSource();
+        } else {
+          msg += err;
+        }
+        debug(msg);
+        throw msg;
 
 //        var p = this.fetch("modules/" + modfile).then((function(xhr) {
 //          var contents = xhr.responseText;
