@@ -3,12 +3,21 @@
 }
 .CodeMirror {
     border-top: 1px solid black; border-bottom: 1px solid black;
+
 }
 #console {
     position: absolute;
     width: 90%;
-    height: 400px;
+    height: 50%;
 }
 .float_right {
     float:right;
+}
+
+.CodeMirror, #console {
+    height: 25%;
+    transition: height 1s ease;
+}
+.CodeMirror:hover, #console:hover {
+    height: 50%;
 }
